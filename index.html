@@ -144,6 +144,16 @@ $('copy').onclick = () => draw(+$('size').value).toBlob(async b => {
   catch { $('msg').textContent = 'コピーに失敗しました。PNG保存をご利用ください'; }
 });
 
+// 前回の色を復元・保存
+try {
+  const saved = JSON.parse(localStorage.getItem('qr-colors') || 'null');
+  if (saved && saved.fg && saved.bg) { $('fg').value = saved.fg; $('bg').value = saved.bg; }
+} catch (e) {}
+function saveColors() {
+  try { localStorage.setItem('qr-colors', JSON.stringify({ fg: $('fg').value, bg: $('bg').value })); } catch (e) {}
+}
+['fg','bg'].forEach(i => $(i).addEventListener('input', saveColors));
+
 ['text','ec','margin','fg','bg'].forEach(i => $(i).addEventListener('input', build));
 $('size').addEventListener('input', () => { $('sizeVal').textContent = $('size').value; build(); });
 window.addEventListener('load', build);
