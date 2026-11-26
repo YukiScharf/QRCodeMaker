@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QRコード作成ツール</title>
+<style>
+  :root { --fg:#1f2328; --muted:#656d76; --line:#d0d7de; --accent:#0969da; --bg:#f6f8fa; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family:-apple-system,"Segoe UI","Yu Gothic UI",Meiryo,sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:880px; margin:0 auto; padding:32px 16px; }
+  h1 { font-size:24px; margin:0 0 20px; }
+  .grid { display:grid; grid-template-columns:1fr 340px; gap:20px; }
+  @media (max-width:720px){ .grid{ grid-template-columns:1fr; } }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:20px; }
+  label { display:block; font-size:13px; font-weight:600; margin:14px 0 6px; }
+  label:first-child { margin-top:0; }
+  textarea, select, input[type=number] { width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:6px; font:inherit; }
+  textarea { height:120px; resize:vertical; }
+  .row { display:flex; gap:12px; }
+  .row > div { flex:1; }
+  input[type=color] { width:100%; height:38px; border:1px solid var(--line); border-radius:6px; padding:2px; background:#fff; }
+  input[type=range] { width:100%; }
+  .preview { display:flex; flex-direction:column; align-items:center; gap:16px; }
+  #stage { width:100%; aspect-ratio:1; display:flex; align-items:center; justify-content:center; border:1px dashed var(--line); border-radius:6px; overflow:hidden; }
+  #stage canvas { max-width:100%; max-height:100%; image-rendering:pixelated; }
+  .btns { display:flex; gap:8px; width:100%; flex-wrap:wrap; }
+  button { flex:1; padding:9px 12px; border-radius:6px; border:1px solid var(--line); background:#fff; font:inherit; cursor:pointer; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .msg { font-size:13px; color:var(--muted); min-height:18px; text-align:center; }
+  .err { color:#cf222e; }
+</style>
+</head>
+<body>
+<main>
+  <h1>QRコード作成ツール</h1>
+  <div class="grid">
+    <section class="card">
+      <label for="text">テキストまたはURL</label>
+      <textarea id="text" placeholder="https://example.com">https://example.com</textarea>
+
+      <div class="row">
+        <div>
+          <label for="ec">誤り訂正レベル</label>
+          <select id="ec">
+            <option value="L">L（約7%）</option>
+            <option value="M" selected>M（約15%）</option>
+            <option value="Q">Q（約25%）</option>
+            <option value="H">H（約30%）</option>
+          </select>
+        </div>
+        <div>
+          <label for="margin">余白（モジュール数）</label>
+          <input type="number" id="margin" min="0" max="20" value="4">
+        </div>
+      </div>
+
+      <label for="size">サイズ：<span id="sizeVal">320</span> px</label>
+      <input type="range" id="size" min="128" max="1024" step="16" value="320">
+
+      <div class="row">
+        <div><label for="fg">前景色</label><input type="color" id="fg" value="#000000"></div>
+        <div><label for="bg">背景色</label><input type="color" id="bg" value="#ffffff"></div>
+      </div>
+    </section>
+
+    <section class="card preview">
+      <div id="stage"></div>
+      <div class="msg" id="msg"></div>
+      <div class="btns">
+        <button class="primary" id="dlPng" disabled>PNG保存</button>
+        <button id="dlSvg" disabled>SVG保存</button>
+        <button id="copy" disabled>画像をコピー</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let qr = null;
+
+function build() {
+  const text = $('text').value;
+  const msg = $('msg');
+  const stage = $('stage');
+  stage.innerHTML = '';
+  qr = null;
+  ['dlPng','dlSvg','copy'].forEach(i => $(i).disabled = true);
+  msg.className = 'msg';
+  if (!text) { msg.textContent = 'テキストを入力してください'; return; }
+  if (typeof qrcode === 'undefined') { msg.textContent = 'ライブラリを読み込めませんでした（ネット接続を確認してください）'; msg.className = 'msg err'; return; }
+  try {
+    qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];
+    const q = qrcode(0, $('ec').value);
+    q.addData(text, 'Byte');
+    q.make();
+    qr = q;
+  } catch (e) {
+    msg.textContent = 'データが長すぎます。誤り訂正レベルを下げるか、文字数を減らしてください'; msg.className = 'msg err'; return;
+  }
+  const canvas = draw(+$('size').value);
+  stage.appendChild(canvas);
+  msg.textContent = `バージョン ${qr.getModuleCount() ? (qr.getModuleCount()-17)/4 : ''} / ${qr.getModuleCount()}×${qr.getModuleCount()} モジュール`;
+  ['dlPng','dlSvg','copy'].forEach(i => $(i).disabled = false);
+}
+
+function draw(size) {
+  const n = qr.getModuleCount(), m = Math.max(0, +$('margin').value || 0);
+  const total = n + m * 2;
+  const scale = Math.max(1, Math.floor(size / total));
+  const px = scale * total;
+  const c = document.createElement('canvas');
+  c.width = c.height = px;
+  const g = c.getContext('2d');
+  g.fillStyle = $('bg').value; g.fillRect(0, 0, px, px);
+  g.fillStyle = $('fg').value;
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++)
+    if (qr.isDark(r, k)) g.fillRect((k + m) * scale, (r + m) * scale, scale, scale);
+  return c;
+}
+
+function svg() {
+  const n = qr.getModuleCount(), m = Math.max(0, +$('margin').value || 0), t = n + m * 2;
+  let d = '';
+  for (let r = 0; r < n; r++) for (let k = 0; k < n; k++)
+    if (qr.isDark(r, k)) d += `M${k + m},${r + m}h1v1h-1z`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${t} ${t}" width="${$('size').value}" height="${$('size').value}" shape-rendering="crispEdges"><rect width="${t}" height="${t}" fill="${$('bg').value}"/><path d="${d}" fill="${$('fg').value}"/></svg>`;
+}
+
+function save(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+$('dlPng').onclick = () => draw(+$('size').value).toBlob(b => save(b, 'qrcode.png'));
+$('dlSvg').onclick = () => save(new Blob([svg()], {type:'image/svg+xml'}), 'qrcode.svg');
+$('copy').onclick = () => draw(+$('size').value).toBlob(async b => {
+  try { await navigator.clipboard.write([new ClipboardItem({'image/png': b})]); $('msg').textContent = 'コピーしました'; }
+  catch { $('msg').textContent = 'コピーに失敗しました。PNG保存をご利用ください'; }
+});
+
+['text','ec','margin','fg','bg'].forEach(i => $(i).addEventListener('input', build));
+$('size').addEventListener('input', () => { $('sizeVal').textContent = $('size').value; build(); });
+window.addEventListener('load', build);
+</script>
+</body>
+</html>
